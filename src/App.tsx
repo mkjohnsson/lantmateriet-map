@@ -500,7 +500,7 @@ function App() {
   return (
     <div className="app">
       <div className="toolbar">
-        <h1>Sverige Karta</h1>
+        <img src="/logo.png" alt="Weraryu?" className="toolbar-logo" />
         <div className="search-box">
           <input
             type="text"

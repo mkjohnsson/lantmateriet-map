@@ -28,9 +28,11 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-.toolbar h1 {
-  font-size: 1.2rem;
-  font-weight: 600;
+.toolbar-logo {
+  height: 2rem;
+  width: auto;
+  object-fit: contain;
+  filter: invert(1);
 }
 
 .info {
@@ -465,8 +467,8 @@ html, body, #root {
     padding: 0.5rem 0.75rem;
   }
 
-  .toolbar h1 {
-    display: none;
+  .toolbar-logo {
+    height: 1.5rem;
   }
 
   .search-box {
