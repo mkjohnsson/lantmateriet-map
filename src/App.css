@@ -41,9 +41,16 @@ html, body, #root {
   color: #94a3b8;
 }
 
+.map-container {
+  flex: 1;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+
 .map {
   flex: 1;
-  width: 100%;
+  height: 100%;
 }
 
 .missing-key {
@@ -183,6 +190,113 @@ html, body, #root {
   color: #e2e8f0;
 }
 
+/* POI bar */
+.poi-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1.25rem;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.poi-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 1rem;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.poi-btn:hover {
+  border-color: var(--poi-color);
+  color: #e2e8f0;
+}
+
+.poi-btn.active {
+  background: var(--poi-color);
+  border-color: var(--poi-color);
+  color: #fff;
+  font-weight: 600;
+}
+
+.poi-btn-emoji {
+  font-size: 1rem;
+}
+
+.poi-loading {
+  font-size: 0.8rem;
+  color: #60a5fa;
+  margin-left: 0.5rem;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* POI popup */
+.poi-popup {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  min-width: 160px;
+  max-width: 260px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  position: relative;
+}
+
+.poi-popup::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid #1e293b;
+}
+
+.poi-popup-close {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.4rem;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.poi-popup-close:hover {
+  color: #e2e8f0;
+}
+
+.poi-popup-content strong {
+  font-size: 0.9rem;
+}
+
+.poi-popup-type {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
 /* OpenLayers overrides */
 .ol-zoom {
   top: 0.5rem;
@@ -213,4 +327,236 @@ html, body, #root {
   color: #e2e8f0;
   border-color: #94a3b8;
   font-size: 0.75rem;
+}
+
+/* Chat toggle button */
+.chat-toggle {
+  position: absolute;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: #9333ea;
+  color: #fff;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.chat-toggle:hover {
+  background: #7e22ce;
+}
+
+/* Chat panel */
+.chat-panel {
+  width: 350px;
+  height: 100%;
+  background: #1e293b;
+  border-left: 1px solid #334155;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.chat-header {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-bottom: 1px solid #334155;
+  color: #c084fc;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-hint {
+  color: #64748b;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 2rem 1rem;
+  line-height: 1.5;
+}
+
+.chat-msg {
+  max-width: 90%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.chat-msg-user {
+  align-self: flex-end;
+  background: #3b82f6;
+  color: #fff;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.chat-msg-ai {
+  align-self: flex-start;
+  background: #334155;
+  color: #e2e8f0;
+  border-bottom-left-radius: 0.25rem;
+}
+
+.chat-msg-text {
+  white-space: pre-wrap;
+}
+
+.chat-loading {
+  animation: pulse 1s ease-in-out infinite;
+  color: #c084fc;
+}
+
+.chat-places {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.chat-place-btn {
+  background: #9333ea33;
+  border: 1px solid #9333ea;
+  color: #c084fc;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chat-place-btn:hover {
+  background: #9333ea;
+  color: #fff;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+.chat-input-row input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.chat-input-row input:focus {
+  border-color: #9333ea;
+}
+
+.chat-input-row input::placeholder {
+  color: #64748b;
+}
+
+.chat-input-row button {
+  padding: 0.5rem 0.75rem;
+  background: #9333ea;
+  color: #fff;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.chat-input-row button:hover:not(:disabled) {
+  background: #7e22ce;
+}
+
+.chat-input-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  /* Toolbar: compact single row */
+  .toolbar {
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .toolbar h1 {
+    display: none;
+  }
+
+  .search-box {
+    flex: 1 1 auto;
+  }
+
+  .info {
+    display: none;
+  }
+
+  .layer-btn {
+    min-height: 44px;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.7rem;
+  }
+
+  /* POI bar: emoji-only compact buttons */
+  .poi-bar {
+    gap: 0.35rem;
+    padding: 0.3rem 0.75rem;
+  }
+
+  .poi-btn {
+    font-size: 0;
+    padding: 0.4rem;
+    min-height: 44px;
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  .poi-btn-emoji {
+    font-size: 1.2rem;
+  }
+
+  /* Chat panel: fullscreen overlay */
+  .chat-panel {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    z-index: 200;
+    border-left: none;
+  }
+
+  /* Chat toggle: bigger touch target */
+  .chat-toggle {
+    width: 3.5rem;
+    height: 3.5rem;
+    font-size: 1.5rem;
+  }
+
+  .chat-input-row button {
+    min-height: 44px;
+  }
+
+  .chat-input-row input {
+    min-height: 44px;
+  }
 }
