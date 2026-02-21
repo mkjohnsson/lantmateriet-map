@@ -51,6 +51,25 @@ app.get('/api/wmts', async (req, res) => {
       headers: { 'Authorization': `Bearer ${token}` },
     });
 
+    if (wmtsRes.status === 401) {
+      // Token expired, force refresh and retry once
+      cachedToken = null;
+      tokenExpiry = 0;
+      const newToken = await getToken();
+      const retryRes = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${newToken}` },
+      });
+      if (!retryRes.ok) {
+        console.log('WMTS error after retry:', retryRes.status);
+        return res.status(retryRes.status).send('WMTS request failed');
+      }
+      const ct = retryRes.headers.get('content-type') || 'application/octet-stream';
+      res.set('Content-Type', ct);
+      res.set('Cache-Control', 'public, max-age=86400');
+      const buf = Buffer.from(await retryRes.arrayBuffer());
+      return res.send(buf);
+    }
+
     if (!wmtsRes.ok) {
       console.log('WMTS error:', wmtsRes.status);
       return res.status(wmtsRes.status).send('WMTS request failed');

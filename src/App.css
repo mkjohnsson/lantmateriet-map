@@ -90,6 +90,40 @@ html, body, #root {
   color: #60a5fa;
 }
 
+/* Layer switcher */
+.layer-switcher {
+  display: flex;
+  gap: 0;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.layer-btn {
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.layer-btn:first-child {
+  border-right: 1px solid #334155;
+}
+
+.layer-btn:hover {
+  color: #e2e8f0;
+  background: #334155;
+}
+
+.layer-btn.active {
+  background: #60a5fa;
+  color: #0f172a;
+  font-weight: 600;
+}
+
 /* Search */
 .search-box {
   position: relative;

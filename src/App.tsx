@@ -4,29 +4,43 @@ import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
 import WMTS from 'ol/source/WMTS';
 import WMTSTileGrid from 'ol/tilegrid/WMTS';
+import OSM from 'ol/source/OSM';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import { Icon, Style } from 'ol/style';
-import { register } from 'ol/proj/proj4';
-import { get as getProjection, transform } from 'ol/proj';
-import proj4 from 'proj4';
+import { fromLonLat } from 'ol/proj';
 import ScaleLine from 'ol/control/ScaleLine';
 import Zoom from 'ol/control/Zoom';
 import 'ol/ol.css';
 import './App.css';
 
-// Register SWEREF99 TM (EPSG:3006)
-proj4.defs('EPSG:3006', '+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
-register(proj4);
-
-const extent3006: [number, number, number, number] = [-1200000, 4305696, 2994304, 8500000];
-const origin3006: [number, number] = [-1200000, 8500000];
-const resolutions3006 = [4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8];
-const matrixIds = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+// Lantmäteriet 3857 tile grid (from GetCapabilities)
+// 16 zoom levels (0-15), standard Web Mercator
+const lmResolutions = [
+  559082264.028717875 * 0.00028,  // 0
+  279541132.014358878 * 0.00028,  // 1
+  139770566.007179409 * 0.00028,  // 2
+  69885283.003589719 * 0.00028,   // 3
+  34942641.501794859 * 0.00028,   // 4
+  17471320.750897429 * 0.00028,   // 5
+  8735660.375448714 * 0.00028,    // 6
+  4367830.187724357 * 0.00028,    // 7
+  2183915.093862178 * 0.00028,    // 8
+  1091957.546931088 * 0.00028,    // 9
+  545978.773465544 * 0.00028,     // 10
+  272989.386732772 * 0.00028,     // 11
+  136494.693366386 * 0.00028,     // 12
+  68247.346683193 * 0.00028,      // 13
+  34123.673341596 * 0.00028,      // 14
+  17061.836670798 * 0.00028,      // 15
+];
+const lmMatrixIds = Array.from({ length: 16 }, (_, i) => String(i));
 
 const apiBase = import.meta.env.DEV ? 'http://localhost:3000' : '';
+
+type BaseLayer = 'lantmateriet' | 'osm';
 
 interface SearchResult {
   display_name: string;
@@ -37,9 +51,13 @@ interface SearchResult {
 function App() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<Map | null>(null);
+  const lmLayerRef = useRef<TileLayer | null>(null);
+  const osmLayerRef = useRef<TileLayer | null>(null);
   const markerSource = useRef<VectorSource>(new VectorSource());
-  const [coordinates, setCoordinates] = useState<{ x: number; y: number } | null>(null);
-  const [zoomLevel, setZoomLevel] = useState(2);
+  const coordRef = useRef<HTMLSpanElement>(null);
+  const zoomRef = useRef<HTMLSpanElement>(null);
+  const [zoomLevel, setZoomLevel] = useState(5);
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>('lantmateriet');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -48,29 +66,35 @@ function App() {
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
 
-    const projection = getProjection('EPSG:3006')!;
-    projection.setExtent(extent3006);
+    const wmtsExtent: [number, number, number, number] = [-20037508.342789, -20037508.342789, 20037508.342789, 20037508.342789];
 
     const tileGrid = new WMTSTileGrid({
       tileSize: 256,
-      extent: extent3006,
-      resolutions: resolutions3006,
-      matrixIds,
-      origin: origin3006,
+      extent: wmtsExtent,
+      resolutions: lmResolutions,
+      matrixIds: lmMatrixIds,
+      origin: [-20037508.342789, 20037508.342789],
     });
 
-    const wmtsSource = new WMTS({
-      url: `${apiBase}/api/wmts`,
-      layer: 'topowebb',
-      format: 'image/png',
-      matrixSet: '3006',
-      tileGrid,
-      version: '1.0.0',
-      style: 'default',
-      requestEncoding: 'KVP',
+    const lmLayer = new TileLayer({
+      source: new WMTS({
+        url: `${apiBase}/api/wmts`,
+        layer: 'topowebb',
+        format: 'image/png',
+        matrixSet: '3857',
+        tileGrid,
+        version: '1.0.0',
+        style: 'default',
+        requestEncoding: 'KVP',
+      }),
+      visible: true,
     });
 
-    // Marker layer for search results
+    const osmLayer = new TileLayer({
+      source: new OSM(),
+      visible: false,
+    });
+
     const markerLayer = new VectorLayer({
       source: markerSource.current,
       style: new Style({
@@ -87,29 +111,33 @@ function App() {
       }),
     });
 
+    lmLayerRef.current = lmLayer;
+    osmLayerRef.current = osmLayer;
+
     const map = new Map({
       target: mapRef.current,
-      layers: [
-        new TileLayer({ source: wmtsSource }),
-        markerLayer,
-      ],
+      layers: [lmLayer, osmLayer, markerLayer],
       view: new View({
-        projection: 'EPSG:3006',
-        extent: extent3006,
-        center: [616542, 6727536],
-        zoom: 2,
-        resolutions: resolutions3006,
+        center: fromLonLat([18.07, 59.33]), // Stockholm
+        zoom: 5,
+        minZoom: 0,
+        maxZoom: 18,
       }),
       controls: [new Zoom(), new ScaleLine()],
     });
 
     map.on('pointermove', (e) => {
+      if (!coordRef.current) return;
       const [x, y] = e.coordinate;
-      setCoordinates({ x: Math.round(x), y: Math.round(y) });
+      const lon = (x / 20037508.342789) * 180;
+      const lat = (Math.atan(Math.exp((y / 20037508.342789) * Math.PI)) * 360 / Math.PI) - 90;
+      coordRef.current.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     });
 
     map.on('moveend', () => {
-      setZoomLevel(map.getView().getZoom() ?? 0);
+      const z = Math.round(map.getView().getZoom() ?? 0);
+      setZoomLevel(z);
+      if (zoomRef.current) zoomRef.current.textContent = `Zoom: ${z}`;
     });
 
     mapInstance.current = map;
@@ -119,6 +147,14 @@ function App() {
       mapInstance.current = null;
     };
   }, []);
+
+  const switchLayer = (layer: BaseLayer) => {
+    setBaseLayer(layer);
+    if (lmLayerRef.current && osmLayerRef.current) {
+      lmLayerRef.current.setVisible(layer === 'lantmateriet');
+      osmLayerRef.current.setVisible(layer === 'osm');
+    }
+  };
 
   const search = useCallback(async (q: string) => {
     if (q.length < 2) {
@@ -149,18 +185,14 @@ function App() {
     const map = mapInstance.current;
     if (!map) return;
 
-    const lon = parseFloat(result.lon);
-    const lat = parseFloat(result.lat);
-    const coord = transform([lon, lat], 'EPSG:4326', 'EPSG:3006');
+    const coord = fromLonLat([parseFloat(result.lon), parseFloat(result.lat)]);
 
-    // Add marker
     markerSource.current.clear();
     markerSource.current.addFeature(new Feature(new Point(coord)));
 
-    // Fly to location
     map.getView().animate({
       center: coord,
-      zoom: 7,
+      zoom: 14,
       duration: 800,
     });
 
@@ -171,7 +203,7 @@ function App() {
   return (
     <div className="app">
       <div className="toolbar">
-        <h1>Lantmäteriet Karta</h1>
+        <h1>Sverige Karta</h1>
         <div className="search-box">
           <input
             type="text"
@@ -193,13 +225,23 @@ function App() {
             </div>
           )}
         </div>
+        <div className="layer-switcher">
+          <button
+            className={`layer-btn ${baseLayer === 'lantmateriet' ? 'active' : ''}`}
+            onClick={() => switchLayer('lantmateriet')}
+          >
+            Lantmäteriet
+          </button>
+          <button
+            className={`layer-btn ${baseLayer === 'osm' ? 'active' : ''}`}
+            onClick={() => switchLayer('osm')}
+          >
+            OpenStreetMap
+          </button>
+        </div>
         <div className="info">
-          <span>Zoom: {zoomLevel.toFixed(0)}</span>
-          {coordinates && (
-            <span>
-              SWEREF99: {coordinates.x}, {coordinates.y}
-            </span>
-          )}
+          <span ref={zoomRef}>Zoom: {zoomLevel}</span>
+          <span ref={coordRef}></span>
         </div>
       </div>
       <div ref={mapRef} className="map" />
