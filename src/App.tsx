@@ -96,7 +96,7 @@ function App() {
   const coordRef = useRef<HTMLSpanElement>(null);
   const zoomRef = useRef<HTMLSpanElement>(null);
   const [zoomLevel, setZoomLevel] = useState(5);
-  const [baseLayer, setBaseLayer] = useState<BaseLayer>('lantmateriet');
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>('osm');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -254,6 +254,7 @@ function App() {
   // Swipe-to-close state
   const touchStartY = useRef<number | null>(null);
   const chatPanelRef = useRef<HTMLDivElement>(null);
+  const chatHeaderRef = useRef<HTMLDivElement>(null);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
@@ -269,7 +270,7 @@ function App() {
 
   // Non-passive touchmove to allow preventDefault (stops page scroll during swipe)
   useEffect(() => {
-    const el = chatPanelRef.current;
+    const el = chatHeaderRef.current;
     if (!el) return;
     const onTouchMove = (e: TouchEvent) => {
       if (touchStartY.current !== null) {
@@ -320,12 +321,12 @@ function App() {
         style: 'default',
         requestEncoding: 'KVP',
       }),
-      visible: true,
+      visible: false,
     });
 
     const osmLayer = new TileLayer({
       source: new OSM(),
-      visible: false,
+      visible: true,
     });
 
     const markerLayer = new VectorLayer({
@@ -521,49 +522,43 @@ function App() {
             </div>
           )}
         </div>
-        <div className="layer-switcher">
-          <button
-            className={`layer-btn ${baseLayer === 'lantmateriet' ? 'active' : ''}`}
-            onClick={() => switchLayer('lantmateriet')}
-          >
-            Lantmäteriet
-          </button>
-          <button
-            className={`layer-btn ${baseLayer === 'osm' ? 'active' : ''}`}
-            onClick={() => switchLayer('osm')}
-          >
-            OpenStreetMap
-          </button>
-        </div>
+        <button
+          className="layer-toggle"
+          onClick={() => switchLayer(baseLayer === 'lantmateriet' ? 'osm' : 'lantmateriet')}
+        >
+          {baseLayer === 'lantmateriet' ? 'Kartvy: LM' : 'Kartvy: OSM'}
+        </button>
         <div className="info">
           <span ref={zoomRef}>Zoom: {zoomLevel}</span>
           <span ref={coordRef}></span>
         </div>
       </div>
-      <div className="poi-bar">
-        {POI_CATEGORIES.map(cat => (
-          <button
-            key={cat.id}
-            className={`poi-btn ${activePoiCategory === cat.id ? 'active' : ''}`}
-            style={{ '--poi-color': cat.color } as React.CSSProperties}
-            onClick={() => togglePoiCategory(cat.id)}
-          >
-            <span className="poi-btn-emoji">{cat.emoji}</span>
-            {cat.label}
-          </button>
-        ))}
-        {loadingPois && <span className="poi-loading">Laddar...</span>}
-      </div>
       <div className="map-container">
         <div ref={mapRef} className="map" />
+        <div className="poi-bar">
+          {POI_CATEGORIES.map(cat => (
+            <button
+              key={cat.id}
+              className={`poi-btn ${activePoiCategory === cat.id ? 'active' : ''}`}
+              style={{ '--poi-color': cat.color } as React.CSSProperties}
+              onClick={() => togglePoiCategory(cat.id)}
+            >
+              {cat.label}
+            </button>
+          ))}
+          {loadingPois && <span className="poi-loading">Laddar...</span>}
+        </div>
         {/* Chat panel — always visible on mobile, sidebar on desktop */}
         <div
           ref={chatPanelRef}
           className={`chat-panel ${chatOpen ? 'chat-panel-open' : ''}`}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
         >
-          <div className="chat-panel-header">
+          <div
+            ref={chatHeaderRef}
+            className="chat-panel-header"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
             <div className="chat-drag-handle" />
             <div className="chat-search-bar">
               <input

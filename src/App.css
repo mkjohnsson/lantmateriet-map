@@ -97,38 +97,23 @@ html, body, #root {
   color: #60a5fa;
 }
 
-/* Layer switcher */
-.layer-switcher {
-  display: flex;
-  gap: 0;
+/* Layer toggle */
+.layer-toggle {
+  padding: 0.4rem 0.75rem;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(6px);
   border: 1px solid #334155;
   border-radius: 0.5rem;
-  overflow: hidden;
-}
-
-.layer-btn {
-  padding: 0.4rem 0.75rem;
-  background: transparent;
-  border: none;
   color: #94a3b8;
   font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
-.layer-btn:first-child {
-  border-right: 1px solid #334155;
-}
-
-.layer-btn:hover {
+.layer-toggle:hover {
   color: #e2e8f0;
   background: #334155;
-}
-
-.layer-btn.active {
-  background: #60a5fa;
-  color: #0f172a;
-  font-weight: 600;
 }
 
 /* Search */
@@ -190,27 +175,33 @@ html, body, #root {
   color: #e2e8f0;
 }
 
-/* POI bar */
+/* POI bar — floating chips on map */
 .poi-bar {
+  position: absolute;
+  top: 0.75rem;
+  left: 3.5rem;
+  z-index: 50;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.4rem 1.25rem;
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
-  flex-shrink: 0;
   overflow-x: auto;
+  max-width: calc(100% - 1.5rem);
+  scrollbar-width: none;
+}
+
+.poi-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .poi-btn {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.65rem;
-  background: #0f172a;
-  border: 1px solid #334155;
+  padding: 0.35rem 0.75rem;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(51, 65, 85, 0.6);
   border-radius: 1rem;
-  color: #94a3b8;
+  color: #cbd5e1;
   font-size: 0.8rem;
   cursor: pointer;
   white-space: nowrap;
@@ -227,10 +218,6 @@ html, body, #root {
   border-color: var(--poi-color);
   color: #fff;
   font-weight: 600;
-}
-
-.poi-btn-emoji {
-  font-size: 1rem;
 }
 
 .poi-loading {
@@ -490,28 +477,14 @@ html, body, #root {
     display: none;
   }
 
-  .layer-btn {
+  .layer-toggle {
     min-height: 44px;
-    padding: 0.4rem 0.5rem;
-    font-size: 0.7rem;
-  }
-
-  /* POI bar: emoji-only compact buttons */
-  .poi-bar {
-    gap: 0.35rem;
-    padding: 0.3rem 0.75rem;
+    font-size: 0.75rem;
   }
 
   .poi-btn {
-    font-size: 0;
-    padding: 0.4rem;
     min-height: 44px;
-    min-width: 44px;
-    justify-content: center;
-  }
-
-  .poi-btn-emoji {
-    font-size: 1.2rem;
+    font-size: 0.75rem;
   }
 
   /* Chat panel: collapsible bottom sheet */
