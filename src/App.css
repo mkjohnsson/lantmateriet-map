@@ -22,14 +22,14 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.25rem;
+  padding: 1rem 1.25rem;
   background: #1e293b;
   border-bottom: 1px solid #334155;
   flex-shrink: 0;
 }
 
 .toolbar-logo {
-  height: 4.8rem;
+  height: 3rem;
   width: auto;
   object-fit: contain;
 }
@@ -463,11 +463,11 @@ html, body, #root {
   /* Toolbar: compact single row */
   .toolbar {
     gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.25rem 0.75rem;
   }
 
   .toolbar-logo {
-    height: 4rem;
+    height: 2rem;
   }
 
   .search-box {
