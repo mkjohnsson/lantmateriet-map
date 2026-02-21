@@ -251,6 +251,46 @@ function App() {
     }
   }, [chatInput, chatLoading, plotAIPlaces]);
 
+  // Swipe-to-close state
+  const touchStartY = useRef<number | null>(null);
+  const chatPanelRef = useRef<HTMLDivElement>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartY.current === null) return;
+    const diff = e.changedTouches[0].clientY - touchStartY.current;
+    if (diff > 50) setChatOpen(false);
+    else if (diff < -50) setChatOpen(true);
+    touchStartY.current = null;
+  };
+
+  // Non-passive touchmove to allow preventDefault (stops page scroll during swipe)
+  useEffect(() => {
+    const el = chatPanelRef.current;
+    if (!el) return;
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchStartY.current !== null) {
+        const diff = e.touches[0].clientY - touchStartY.current;
+        if (diff > 10) e.preventDefault();
+      }
+    };
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => el.removeEventListener('touchmove', onTouchMove);
+  }, []);
+
+  const handleSearchSubmit = () => {
+    if (!chatInput.trim()) return;
+    setChatOpen(true);
+    sendChatMessage();
+  };
+
+  const handleSearchFocus = () => {
+    if (chatMessages.length > 0) setChatOpen(true);
+  };
+
   // Auto-scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -516,67 +556,69 @@ function App() {
       </div>
       <div className="map-container">
         <div ref={mapRef} className="map" />
-        {/* Chat toggle button */}
-        <button className="chat-toggle" onClick={() => setChatOpen(o => !o)}>
-          {chatOpen ? '\u2715' : '\uD83D\uDCAC'}
-        </button>
-        {/* Chat panel */}
-        {chatOpen && (
-          <div className="chat-panel">
-            <div className="chat-header">AI Platsguide</div>
-            <div className="chat-messages">
-              {chatMessages.length === 0 && (
-                <div className="chat-hint">
-                  Ställ en fråga om platser i Sverige, t.ex. "Var ligger Vasamuseet?" eller "Vilka slott finns runt Stockholm?"
-                </div>
-              )}
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`chat-msg chat-msg-${msg.role}`}>
-                  <div className="chat-msg-text">{msg.text}</div>
-                  {msg.places && msg.places.length > 0 && (
-                    <div className="chat-places">
-                      {msg.places.map((p, j) => (
-                        <button
-                          key={j}
-                          className="chat-place-btn"
-                          onClick={() => {
-                            const map = mapInstance.current;
-                            if (!map) return;
-                            const coord = fromLonLat([p.lon, p.lat]);
-                            map.getView().animate({ center: coord, zoom: 14, duration: 800 });
-                          }}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {chatLoading && (
-                <div className="chat-msg chat-msg-ai">
-                  <div className="chat-msg-text chat-loading">Tänker...</div>
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-            <div className="chat-input-row">
+        {/* Chat panel — always visible on mobile, sidebar on desktop */}
+        <div
+          ref={chatPanelRef}
+          className={`chat-panel ${chatOpen ? 'chat-panel-open' : ''}`}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="chat-panel-header">
+            <div className="chat-drag-handle" />
+            <div className="chat-search-bar">
               <input
                 type="text"
                 placeholder="Fråga om en plats..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') sendChatMessage();
+                  if (e.key === 'Enter') handleSearchSubmit();
                 }}
+                onFocus={handleSearchFocus}
                 disabled={chatLoading}
               />
-              <button onClick={sendChatMessage} disabled={chatLoading || !chatInput.trim()}>
+              <button onClick={handleSearchSubmit} disabled={chatLoading || !chatInput.trim()}>
                 Skicka
               </button>
             </div>
           </div>
-        )}
+          <div className="chat-messages">
+            {chatMessages.length === 0 && (
+              <div className="chat-hint">
+                Ställ en fråga om platser i Sverige, t.ex. &quot;Var ligger Vasamuseet?&quot; eller &quot;Vilka slott finns runt Stockholm?&quot;
+              </div>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`chat-msg chat-msg-${msg.role}`}>
+                <div className="chat-msg-text">{msg.text}</div>
+                {msg.places && msg.places.length > 0 && (
+                  <div className="chat-places">
+                    {msg.places.map((p, j) => (
+                      <button
+                        key={j}
+                        className="chat-place-btn"
+                        onClick={() => {
+                          const map = mapInstance.current;
+                          if (!map) return;
+                          const coord = fromLonLat([p.lon, p.lat]);
+                          map.getView().animate({ center: coord, zoom: 14, duration: 800 });
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="chat-msg chat-msg-ai">
+                <div className="chat-msg-text chat-loading">Tänker...</div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+        </div>
       </div>
       <div ref={popupRef} className="poi-popup">
         <button className="poi-popup-close" onClick={closePopup}>&times;</button>

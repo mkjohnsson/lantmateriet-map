@@ -329,32 +329,7 @@ html, body, #root {
   font-size: 0.75rem;
 }
 
-/* Chat toggle button */
-.chat-toggle {
-  position: absolute;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  width: 3rem;
-  height: 3rem;
-  border-radius: 50%;
-  background: #9333ea;
-  color: #fff;
-  border: none;
-  font-size: 1.4rem;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-}
-
-.chat-toggle:hover {
-  background: #7e22ce;
-}
-
-/* Chat panel */
+/* Chat panel — desktop sidebar */
 .chat-panel {
   width: 350px;
   height: 100%;
@@ -365,12 +340,61 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-.chat-header {
-  padding: 0.75rem 1rem;
-  font-weight: 600;
-  font-size: 0.95rem;
-  border-bottom: 1px solid #334155;
-  color: #c084fc;
+/* Panel header — touch target for swipe on mobile */
+.chat-panel-header {
+  flex-shrink: 0;
+}
+
+/* Drag handle — only visible on mobile */
+.chat-drag-handle {
+  display: none;
+}
+
+/* Search bar at top of panel */
+.chat-search-bar {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.chat-search-bar input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.chat-search-bar input:focus {
+  border-color: #9333ea;
+}
+
+.chat-search-bar input::placeholder {
+  color: #64748b;
+}
+
+.chat-search-bar button {
+  padding: 0.5rem 0.75rem;
+  background: #9333ea;
+  color: #fff;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.chat-search-bar button:hover:not(:disabled) {
+  background: #7e22ce;
+}
+
+.chat-search-bar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chat-messages {
@@ -445,52 +469,6 @@ html, body, #root {
   color: #fff;
 }
 
-.chat-input-row {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-top: 1px solid #334155;
-}
-
-.chat-input-row input {
-  flex: 1;
-  padding: 0.5rem 0.75rem;
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-radius: 0.5rem;
-  color: #e2e8f0;
-  font-size: 0.85rem;
-  outline: none;
-}
-
-.chat-input-row input:focus {
-  border-color: #9333ea;
-}
-
-.chat-input-row input::placeholder {
-  color: #64748b;
-}
-
-.chat-input-row button {
-  padding: 0.5rem 0.75rem;
-  background: #9333ea;
-  color: #fff;
-  border: none;
-  border-radius: 0.5rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-
-.chat-input-row button:hover:not(:disabled) {
-  background: #7e22ce;
-}
-
-.chat-input-row button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* Mobile responsive */
 @media (max-width: 640px) {
@@ -536,7 +514,7 @@ html, body, #root {
     font-size: 1.2rem;
   }
 
-  /* Chat panel: bottom sheet overlay */
+  /* Chat panel: collapsible bottom sheet */
   .chat-panel {
     position: absolute;
     bottom: 0;
@@ -544,26 +522,46 @@ html, body, #root {
     right: 0;
     top: auto;
     width: 100%;
-    height: 60vh;
+    height: auto;
+    max-height: 4.5rem;
     z-index: 200;
     border-left: none;
     border-radius: 1rem 1rem 0 0;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+    transition: max-height 0.35s ease;
+    overflow: hidden;
   }
 
-  /* Chat toggle: bigger touch target, always visible above panel */
-  .chat-toggle {
-    width: 3.5rem;
-    height: 3.5rem;
-    font-size: 1.5rem;
-    z-index: 210;
+  /* Expanded state */
+  .chat-panel-open {
+    max-height: 60vh;
   }
 
-  .chat-input-row button {
+  .chat-panel-header {
+    touch-action: none;
+  }
+
+  /* Drag handle visible on mobile */
+  .chat-drag-handle {
+    display: block;
+    width: 2.5rem;
+    height: 0.25rem;
+    background: #64748b;
+    border-radius: 0.125rem;
+    margin: 0.5rem auto 0;
+    cursor: grab;
+  }
+
+  /* Hide messages when collapsed */
+  .chat-panel:not(.chat-panel-open) .chat-messages {
+    display: none;
+  }
+
+  .chat-search-bar button {
     min-height: 44px;
   }
 
-  .chat-input-row input {
+  .chat-search-bar input {
     min-height: 44px;
   }
 }
