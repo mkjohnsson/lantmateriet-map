@@ -563,7 +563,7 @@ function App() {
             <div className="chat-search-bar">
               <input
                 type="text"
-                placeholder="Fråga om en plats..."
+                placeholder="Fråga Ai om en plats..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
