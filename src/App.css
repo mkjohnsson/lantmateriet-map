@@ -1,0 +1,182 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  flex-shrink: 0;
+}
+
+.toolbar h1 {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.info {
+  display: flex;
+  gap: 1.5rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.map {
+  flex: 1;
+  width: 100%;
+}
+
+.missing-key {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  text-align: center;
+  padding: 2rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.missing-key h1 {
+  font-size: 1.8rem;
+  margin-bottom: 1rem;
+}
+
+.missing-key p {
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.missing-key code {
+  background: #334155;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.missing-key pre {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 1rem 1.5rem;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+  color: #60a5fa;
+}
+
+.missing-key a {
+  color: #60a5fa;
+}
+
+/* Search */
+.search-box {
+  position: relative;
+  flex: 0 1 320px;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.search-box input:focus {
+  border-color: #60a5fa;
+}
+
+.search-box input::placeholder {
+  color: #64748b;
+}
+
+.search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 0.25rem;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.search-item {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  cursor: pointer;
+  border-bottom: 1px solid #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-item:last-child {
+  border-bottom: none;
+}
+
+.search-item:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+/* OpenLayers overrides */
+.ol-zoom {
+  top: 0.5rem;
+  left: 0.5rem;
+}
+
+.ol-zoom button {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #334155 !important;
+  font-size: 1.2rem !important;
+  width: 2rem !important;
+  height: 2rem !important;
+}
+
+.ol-zoom button:hover {
+  background: #334155 !important;
+}
+
+.ol-scale-line {
+  bottom: 0.5rem;
+  left: 0.5rem;
+  background: none;
+}
+
+.ol-scale-line-inner {
+  background: #1e293b88;
+  color: #e2e8f0;
+  border-color: #94a3b8;
+  font-size: 0.75rem;
+}
