@@ -8,8 +8,13 @@ const app = express();
 // CORS for dev
 app.use((_req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (_req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+app.use(express.json());
 
 const CLIENT_KEY = process.env.LM_CLIENT_KEY;
 const CLIENT_SECRET = process.env.LM_CLIENT_SECRET;
@@ -81,6 +86,178 @@ app.get('/api/wmts', async (req, res) => {
     const buffer = Buffer.from(await wmtsRes.arrayBuffer());
     res.send(buffer);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POI categories → Overpass tags
+const POI_CATEGORIES = {
+  restauranger: { key: 'amenity', value: 'restaurant' },
+  kafeer: { key: 'amenity', value: 'cafe' },
+  parker: { key: 'leisure', value: 'park' },
+  laddstationer: { key: 'amenity', value: 'charging_station' },
+  busshallplatser: { key: 'highway', value: 'bus_stop' },
+};
+
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const poiCache = new Map();
+const POI_CACHE_TTL = 5 * 60 * 1000; // 5 min
+
+app.get('/api/pois', async (req, res) => {
+  try {
+    const { category, bbox } = req.query;
+    const cat = POI_CATEGORIES[category];
+    if (!cat) {
+      return res.status(400).json({ error: `Unknown category. Valid: ${Object.keys(POI_CATEGORIES).join(', ')}` });
+    }
+    if (!bbox) {
+      return res.status(400).json({ error: 'bbox required (south,west,north,east)' });
+    }
+
+    const cacheKey = `${category}:${bbox}`;
+    const cached = poiCache.get(cacheKey);
+    if (cached && Date.now() - cached.time < POI_CACHE_TTL) {
+      return res.json(cached.data);
+    }
+
+    const [south, west, north, east] = bbox.split(',');
+    const query = `[out:json][timeout:10];node["${cat.key}"="${cat.value}"](${south},${west},${north},${east});out body;`;
+
+    const overpassRes = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+
+    if (!overpassRes.ok) {
+      console.log('Overpass error:', overpassRes.status);
+      return res.status(502).json({ error: 'Overpass API error' });
+    }
+
+    const data = await overpassRes.json();
+    const pois = (data.elements || []).map(el => ({
+      id: el.id,
+      name: el.tags?.name || '',
+      lat: el.lat,
+      lon: el.lon,
+      tags: el.tags || {},
+    }));
+
+    poiCache.set(cacheKey, { time: Date.now(), data: pois });
+
+    // Evict old cache entries
+    if (poiCache.size > 200) {
+      const now = Date.now();
+      for (const [k, v] of poiCache) {
+        if (now - v.time > POI_CACHE_TTL) poiCache.delete(k);
+      }
+    }
+
+    res.json(pois);
+  } catch (e) {
+    console.error('POI fetch error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// AI Chat endpoint
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const CHAT_MODEL = 'google/gemini-2.5-flash';
+
+const SYSTEM_PROMPT = `Du är en kunnig guide för Sverige och Norden. Användaren ställer frågor om platser, sevärdheter, historiska händelser och geografi.
+
+VIKTIGT: Du ska ALLTID inkludera platser med koordinater i ditt svar. Formatera dem i ett JSON-block markerat med \`\`\`places och \`\`\`:
+
+\`\`\`places
+[{"name": "Platsnamn", "lat": 59.123, "lon": 18.456, "description": "Kort beskrivning"}]
+\`\`\`
+
+Regler:
+- Svara alltid på svenska
+- Inkludera alltid minst en plats med koordinater
+- Koordinaterna ska vara korrekta WGS84 (lat/lon)
+- Ge en informativ textbeskrivning utöver platserna
+- Om frågan handlar om flera platser, inkludera alla relevanta platser i JSON-blocket`;
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: 'message required' });
+    }
+
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey || apiKey === 'your-openrouter-api-key-here') {
+      return res.status(500).json({ error: 'OPENROUTER_API_KEY not configured' });
+    }
+
+    console.log('Chat request:', message.substring(0, 80));
+
+    const response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('OpenRouter error:', response.status, errText);
+      return res.status(502).json({ error: 'AI API error' });
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+
+    // Parse out places JSON block
+    let places = [];
+    let text = content;
+    const placesMatch = content.match(/```places\s*\n([\s\S]*?)\n```/);
+    if (placesMatch) {
+      try {
+        places = JSON.parse(placesMatch[1]);
+      } catch (e) {
+        console.error('Failed to parse places JSON:', e.message);
+      }
+      // Remove the places block from displayed text
+      text = content.replace(/```places\s*\n[\s\S]*?\n```/, '').trim();
+    }
+
+    // Verify/correct coordinates via Nominatim
+    if (places.length > 0) {
+      const corrected = await Promise.all(places.map(async (place) => {
+        try {
+          const q = encodeURIComponent(place.name);
+          const nomRes = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&countrycodes=se&limit=1&q=${q}`,
+            { headers: { 'User-Agent': 'SverigeKarta/1.0', 'Accept-Language': 'sv' } }
+          );
+          const nomData = await nomRes.json();
+          if (nomData.length > 0) {
+            const correctedLat = parseFloat(nomData[0].lat);
+            const correctedLon = parseFloat(nomData[0].lon);
+            console.log(`Corrected "${place.name}": ${place.lat},${place.lon} → ${correctedLat},${correctedLon}`);
+            return { ...place, lat: correctedLat, lon: correctedLon };
+          }
+        } catch (e) {
+          console.error(`Nominatim lookup failed for "${place.name}":`, e.message);
+        }
+        return place; // keep AI coordinates as fallback
+      }));
+      places = corrected;
+    }
+
+    res.json({ text, places });
+  } catch (e) {
+    console.error('Chat error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

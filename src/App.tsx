@@ -9,8 +9,10 @@ import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
-import { Icon, Style } from 'ol/style';
+import { Icon, Style, Circle as CircleStyle, Fill, Stroke } from 'ol/style';
+import Overlay from 'ol/Overlay';
 import { fromLonLat } from 'ol/proj';
+import { transformExtent } from 'ol/proj';
 import ScaleLine from 'ol/control/ScaleLine';
 import Zoom from 'ol/control/Zoom';
 import 'ol/ol.css';
@@ -48,12 +50,49 @@ interface SearchResult {
   lon: string;
 }
 
+interface POI {
+  id: number;
+  name: string;
+  lat: number;
+  lon: number;
+  tags: Record<string, string>;
+}
+
+interface AIPlace {
+  name: string;
+  lat: number;
+  lon: number;
+  description: string;
+}
+
+interface ChatMessage {
+  role: 'user' | 'ai';
+  text: string;
+  places?: AIPlace[];
+}
+
+const POI_CATEGORIES = [
+  { id: 'restauranger', label: 'Restauranger', emoji: '\u{1F37D}', color: '#f97316' },
+  { id: 'kafeer', label: 'Kaféer', emoji: '\u2615', color: '#92400e' },
+  { id: 'parker', label: 'Parker', emoji: '\u{1F333}', color: '#22c55e' },
+  { id: 'laddstationer', label: 'Laddstationer', emoji: '\u26A1', color: '#eab308' },
+  { id: 'busshallplatser', label: 'Busshållplatser', emoji: '\u{1F68C}', color: '#3b82f6' },
+] as const;
+
+type PoiCategory = typeof POI_CATEGORIES[number]['id'];
+
 function App() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<Map | null>(null);
   const lmLayerRef = useRef<TileLayer | null>(null);
   const osmLayerRef = useRef<TileLayer | null>(null);
   const markerSource = useRef<VectorSource>(new VectorSource());
+  const poiSource = useRef<VectorSource>(new VectorSource());
+  const aiSource = useRef<VectorSource>(new VectorSource());
+  const poiLayerRef = useRef<VectorLayer | null>(null);
+  const aiLayerRef = useRef<VectorLayer | null>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const popupOverlay = useRef<Overlay | null>(null);
   const coordRef = useRef<HTMLSpanElement>(null);
   const zoomRef = useRef<HTMLSpanElement>(null);
   const [zoomLevel, setZoomLevel] = useState(5);
@@ -62,6 +101,160 @@ function App() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [activePoiCategory, setActivePoiCategory] = useState<PoiCategory | null>(null);
+  const [loadingPois, setLoadingPois] = useState(false);
+  const activeCategoryRef = useRef<PoiCategory | null>(null);
+  const poiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Chat state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchPois = useCallback(async (category: PoiCategory) => {
+    const map = mapInstance.current;
+    if (!map) return;
+
+    const extent = map.getView().calculateExtent(map.getSize());
+    const [west, south, east, north] = transformExtent(extent, 'EPSG:3857', 'EPSG:4326');
+    const bbox = `${south},${west},${north},${east}`;
+
+    setLoadingPois(true);
+    try {
+      const res = await fetch(`${apiBase}/api/pois?category=${category}&bbox=${bbox}`);
+      if (!res.ok) throw new Error('POI fetch failed');
+      const pois: POI[] = await res.json();
+
+      // Only update if this category is still active
+      if (activeCategoryRef.current !== category) return;
+
+      const catDef = POI_CATEGORIES.find(c => c.id === category)!;
+      poiSource.current.clear();
+
+      const features = pois.map(poi => {
+        const f = new Feature({
+          geometry: new Point(fromLonLat([poi.lon, poi.lat])),
+          poiName: poi.name || 'Okänd',
+          poiCategory: catDef.label,
+          poiTags: poi.tags,
+        });
+        f.setStyle(new Style({
+          image: new CircleStyle({
+            radius: 7,
+            fill: new Fill({ color: catDef.color }),
+            stroke: new Stroke({ color: '#fff', width: 2 }),
+          }),
+        }));
+        return f;
+      });
+
+      poiSource.current.addFeatures(features);
+    } catch (e) {
+      console.error('POI error:', e);
+    }
+    setLoadingPois(false);
+  }, []);
+
+  const togglePoiCategory = useCallback((categoryId: PoiCategory) => {
+    if (activeCategoryRef.current === categoryId) {
+      // Deactivate
+      activeCategoryRef.current = null;
+      setActivePoiCategory(null);
+      poiSource.current.clear();
+      if (popupOverlay.current) popupOverlay.current.setPosition(undefined);
+    } else {
+      // Activate
+      activeCategoryRef.current = categoryId;
+      setActivePoiCategory(categoryId);
+      if (popupOverlay.current) popupOverlay.current.setPosition(undefined);
+      fetchPois(categoryId);
+    }
+  }, [fetchPois]);
+
+  // Plot AI places on map
+  const plotAIPlaces = useCallback((places: AIPlace[]) => {
+    aiSource.current.clear();
+    if (places.length === 0) return;
+
+    const features = places.map(place => {
+      const f = new Feature({
+        geometry: new Point(fromLonLat([place.lon, place.lat])),
+        poiName: place.name,
+        poiCategory: 'AI-svar',
+        poiTags: { description: place.description },
+      });
+      f.setStyle(new Style({
+        image: new Icon({
+          anchor: [0.5, 1],
+          scale: 1.5,
+          src: 'data:image/svg+xml,' + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="32" viewBox="0 0 24 32">' +
+            '<path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20C24 5.4 18.6 0 12 0z" fill="%239333ea"/>' +
+            '<circle cx="12" cy="11" r="4" fill="white"/>' +
+            '</svg>'
+          ),
+        }),
+      }));
+      return f;
+    });
+
+    aiSource.current.addFeatures(features);
+
+    // Fit view to show all AI places
+    const map = mapInstance.current;
+    if (map && features.length > 0) {
+      const extent = aiSource.current.getExtent();
+      if (!extent) return;
+      map.getView().fit(extent, {
+        padding: [80, 80, 80, chatOpen ? 430 : 80],
+        maxZoom: 14,
+        duration: 800,
+      });
+    }
+  }, [chatOpen]);
+
+  // Send chat message
+  const sendChatMessage = useCallback(async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
+    setChatLoading(true);
+
+    try {
+      const res = await fetch(`${apiBase}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Nätverksfel' }));
+        setChatMessages(prev => [...prev, { role: 'ai', text: `Fel: ${err.error}` }]);
+        return;
+      }
+
+      const data: { text: string; places: AIPlace[] } = await res.json();
+      setChatMessages(prev => [...prev, { role: 'ai', text: data.text, places: data.places }]);
+
+      if (data.places && data.places.length > 0) {
+        plotAIPlaces(data.places);
+      }
+    } catch {
+      setChatMessages(prev => [...prev, { role: 'ai', text: 'Kunde inte nå servern.' }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }, [chatInput, chatLoading, plotAIPlaces]);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, chatLoading]);
 
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
@@ -111,12 +304,28 @@ function App() {
       }),
     });
 
+    const poiLayer = new VectorLayer({
+      source: poiSource.current,
+    });
+    poiLayerRef.current = poiLayer;
+
+    const aiLayer = new VectorLayer({
+      source: aiSource.current,
+    });
+    aiLayerRef.current = aiLayer;
+
     lmLayerRef.current = lmLayer;
     osmLayerRef.current = osmLayer;
 
+    const overlay = new Overlay({
+      element: popupRef.current!,
+      autoPan: { animation: { duration: 250 } },
+    });
+    popupOverlay.current = overlay;
+
     const map = new Map({
       target: mapRef.current,
-      layers: [lmLayer, osmLayer, markerLayer],
+      layers: [lmLayer, osmLayer, markerLayer, poiLayer, aiLayer],
       view: new View({
         center: fromLonLat([18.07, 59.33]), // Stockholm
         zoom: 5,
@@ -124,6 +333,7 @@ function App() {
         maxZoom: 18,
       }),
       controls: [new Zoom(), new ScaleLine()],
+      overlays: [overlay],
     });
 
     map.on('pointermove', (e) => {
@@ -138,6 +348,48 @@ function App() {
       const z = Math.round(map.getView().getZoom() ?? 0);
       setZoomLevel(z);
       if (zoomRef.current) zoomRef.current.textContent = `Zoom: ${z}`;
+
+      // Re-fetch POIs on pan/zoom
+      if (activeCategoryRef.current) {
+        if (poiDebounceRef.current) clearTimeout(poiDebounceRef.current);
+        poiDebounceRef.current = setTimeout(() => {
+          if (activeCategoryRef.current) fetchPois(activeCategoryRef.current);
+        }, 500);
+      }
+    });
+
+    // Click on POI or AI marker → show popup
+    map.on('singleclick', (e) => {
+      const feature = map.forEachFeatureAtPixel(e.pixel, f => f, {
+        layerFilter: l => l === poiLayer || l === aiLayer,
+      });
+      if (feature) {
+        const name = feature.get('poiName');
+        const category = feature.get('poiCategory');
+        const tags = feature.get('poiTags') || {};
+        const geom = feature.getGeometry() as Point;
+
+        const popupEl = popupRef.current;
+        if (popupEl) {
+          let html = `<strong>${name}</strong><br/><span class="poi-popup-type">${category}</span>`;
+          if (tags.description) html += `<br/>${tags.description}`;
+          if (tags.cuisine) html += `<br/>${tags.cuisine}`;
+          if (tags.opening_hours) html += `<br/>${tags.opening_hours}`;
+          if (tags.operator) html += `<br/>${tags.operator}`;
+          popupEl.querySelector('.poi-popup-content')!.innerHTML = html;
+        }
+        overlay.setPosition(geom.getCoordinates());
+      } else {
+        overlay.setPosition(undefined);
+      }
+    });
+
+    // Change cursor on hover over POI or AI marker
+    map.on('pointermove', (e) => {
+      const hit = map.hasFeatureAtPixel(e.pixel, {
+        layerFilter: l => l === poiLayer || l === aiLayer,
+      });
+      map.getTargetElement().style.cursor = hit ? 'pointer' : '';
     });
 
     mapInstance.current = map;
@@ -146,7 +398,7 @@ function App() {
       map.setTarget(undefined);
       mapInstance.current = null;
     };
-  }, []);
+  }, [fetchPois]);
 
   const switchLayer = (layer: BaseLayer) => {
     setBaseLayer(layer);
@@ -200,6 +452,10 @@ function App() {
     setQuery(result.display_name.split(',')[0]);
   };
 
+  const closePopup = () => {
+    if (popupOverlay.current) popupOverlay.current.setPosition(undefined);
+  };
+
   return (
     <div className="app">
       <div className="toolbar">
@@ -244,7 +500,88 @@ function App() {
           <span ref={coordRef}></span>
         </div>
       </div>
-      <div ref={mapRef} className="map" />
+      <div className="poi-bar">
+        {POI_CATEGORIES.map(cat => (
+          <button
+            key={cat.id}
+            className={`poi-btn ${activePoiCategory === cat.id ? 'active' : ''}`}
+            style={{ '--poi-color': cat.color } as React.CSSProperties}
+            onClick={() => togglePoiCategory(cat.id)}
+          >
+            <span className="poi-btn-emoji">{cat.emoji}</span>
+            {cat.label}
+          </button>
+        ))}
+        {loadingPois && <span className="poi-loading">Laddar...</span>}
+      </div>
+      <div className="map-container">
+        <div ref={mapRef} className="map" />
+        {/* Chat toggle button */}
+        <button className="chat-toggle" onClick={() => setChatOpen(o => !o)}>
+          {chatOpen ? '\u2715' : '\uD83D\uDCAC'}
+        </button>
+        {/* Chat panel */}
+        {chatOpen && (
+          <div className="chat-panel">
+            <div className="chat-header">AI Platsguide</div>
+            <div className="chat-messages">
+              {chatMessages.length === 0 && (
+                <div className="chat-hint">
+                  Ställ en fråga om platser i Sverige, t.ex. "Var ligger Vasamuseet?" eller "Vilka slott finns runt Stockholm?"
+                </div>
+              )}
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`chat-msg chat-msg-${msg.role}`}>
+                  <div className="chat-msg-text">{msg.text}</div>
+                  {msg.places && msg.places.length > 0 && (
+                    <div className="chat-places">
+                      {msg.places.map((p, j) => (
+                        <button
+                          key={j}
+                          className="chat-place-btn"
+                          onClick={() => {
+                            const map = mapInstance.current;
+                            if (!map) return;
+                            const coord = fromLonLat([p.lon, p.lat]);
+                            map.getView().animate({ center: coord, zoom: 14, duration: 800 });
+                          }}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="chat-msg chat-msg-ai">
+                  <div className="chat-msg-text chat-loading">Tänker...</div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="chat-input-row">
+              <input
+                type="text"
+                placeholder="Fråga om en plats..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') sendChatMessage();
+                }}
+                disabled={chatLoading}
+              />
+              <button onClick={sendChatMessage} disabled={chatLoading || !chatInput.trim()}>
+                Skicka
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      <div ref={popupRef} className="poi-popup">
+        <button className="poi-popup-close" onClick={closePopup}>&times;</button>
+        <div className="poi-popup-content"></div>
+      </div>
     </div>
   );
 }
