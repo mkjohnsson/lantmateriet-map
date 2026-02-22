@@ -1,0 +1,37 @@
+name: Deploy to Pi
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: [self-hosted, pi]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy
+        run: |
+          APP_DIR="$HOME/apps/lantmateriet-map"
+          mkdir -p "$APP_DIR"
+
+          # Swap in new server and dist
+          rm -rf "$APP_DIR/server" "$APP_DIR/dist"
+          cp -r server dist "$APP_DIR/"
+          cp package.json package-lock.json "$APP_DIR/"
+
+          # Install production dependencies
+          cd "$APP_DIR"
+          npm install --omit=dev
+
+      - name: Restart
+        run: pm2 restart lantmateriet-map
