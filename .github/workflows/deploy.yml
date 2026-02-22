@@ -34,4 +34,4 @@ jobs:
           npm install --omit=dev
 
       - name: Restart
-        run: pm2 restart lantmateriet-map
+        run: pm2 restart weraryu
