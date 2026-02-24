@@ -1,9 +1,45 @@
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { createClient } from '@supabase/supabase-js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+// Supabase persistent cache
+const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY)
+  : null;
+if (!supabase) console.warn('Supabase not configured — persistent cache disabled');
+
+async function loadFromSupabase(key, ttl) {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('cache_entries')
+      .select('data, fetched_at')
+      .eq('key', key)
+      .single();
+    if (error || !data) return null;
+    if (Date.now() - new Date(data.fetched_at).getTime() > ttl) return null;
+    return data.data;
+  } catch (e) {
+    console.warn('Supabase read error:', e.message);
+    return null;
+  }
+}
+
+async function saveToSupabase(key, data) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('cache_entries')
+      .upsert({ key, data, fetched_at: new Date().toISOString() });
+    if (error) console.warn('Supabase write error:', error.message);
+  } catch (e) {
+    console.warn('Supabase write error:', e.message);
+  }
+}
 
 // CORS for dev
 app.use((_req, res, next) => {
@@ -279,58 +315,68 @@ app.get('/api/kommuner-sysselsattning', async (_req, res) => {
     if (scbCache.data && Date.now() - scbCache.ts < SCB_TTL) {
       ({ nameToKod, kodToValue } = scbCache.data);
     } else {
-      // GET metadata → build nameToKod (kommunnamn → 4-siffrig kod)
-      const metaRes = await fetch(SCB_URL);
-      if (!metaRes.ok) throw new Error(`SCB metadata HTTP ${metaRes.status}`);
-      const meta = await metaRes.json();
+      // Try Supabase persistent cache before hitting SCB
+      const sbHit = await loadFromSupabase('scb_sysselsattning_2024', SCB_TTL);
+      if (sbHit) {
+        ({ nameToKod, kodToValue } = sbHit);
+        scbCache.data = sbHit;
+        scbCache.ts = Date.now();
+        console.log('SCB: restored from Supabase cache');
+      } else {
+        // GET metadata → build nameToKod (kommunnamn → 4-siffrig kod)
+        const metaRes = await fetch(SCB_URL);
+        if (!metaRes.ok) throw new Error(`SCB metadata HTTP ${metaRes.status}`);
+        const meta = await metaRes.json();
 
-      const regionVar = meta.variables.find(v => v.code === 'Region');
-      if (!regionVar) throw new Error('SCB: Region variable not found in metadata');
+        const regionVar = meta.variables.find(v => v.code === 'Region');
+        if (!regionVar) throw new Error('SCB: Region variable not found in metadata');
 
-      nameToKod = {};
-      const municipalityCodes = [];
-      regionVar.values.forEach((kod, i) => {
-        if (/^\d{4}$/.test(kod)) {          // 4-digit codes = municipalities
-          nameToKod[regionVar.valueTexts[i]] = kod;
-          municipalityCodes.push(kod);
+        nameToKod = {};
+        const municipalityCodes = [];
+        regionVar.values.forEach((kod, i) => {
+          if (/^\d{4}$/.test(kod)) {          // 4-digit codes = municipalities
+            nameToKod[regionVar.valueTexts[i]] = kod;
+            municipalityCodes.push(kod);
+          }
+        });
+        console.log(`SCB metadata: ${municipalityCodes.length} municipalities found`);
+
+        // POST data → sysselsättningsgrad per municipality
+        const scbQuery = {
+          query: [
+            { code: 'Region',        selection: { filter: 'item', values: municipalityCodes } },
+            { code: 'Kon',           selection: { filter: 'item', values: ['1+2'] } },
+            { code: 'Alder',         selection: { filter: 'item', values: ['16-64'] } },
+            { code: 'Fodelseregion', selection: { filter: 'item', values: ['tot'] } },
+            { code: 'ContentsCode',  selection: { filter: 'item', values: ['000002NS'] } },
+            { code: 'Tid',           selection: { filter: 'item', values: ['2024'] } },
+          ],
+          response: { format: 'json' },
+        };
+
+        const dataRes = await fetch(SCB_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(scbQuery),
+        });
+        if (!dataRes.ok) {
+          const errText = await dataRes.text();
+          throw new Error(`SCB data HTTP ${dataRes.status}: ${errText.slice(0, 200)}`);
         }
-      });
-      console.log(`SCB metadata: ${municipalityCodes.length} municipalities found`);
+        const scbData = await dataRes.json();
 
-      // POST data → sysselsättningsgrad per municipality
-      const scbQuery = {
-        query: [
-          { code: 'Region',        selection: { filter: 'item', values: municipalityCodes } },
-          { code: 'Kon',           selection: { filter: 'item', values: ['1+2'] } },
-          { code: 'Alder',         selection: { filter: 'item', values: ['16-64'] } },
-          { code: 'Fodelseregion', selection: { filter: 'item', values: ['tot'] } },
-          { code: 'ContentsCode',  selection: { filter: 'item', values: ['000002NS'] } },
-          { code: 'Tid',           selection: { filter: 'item', values: ['2024'] } },
-        ],
-        response: { format: 'json' },
-      };
+        kodToValue = {};
+        for (const row of (scbData.data || [])) {
+          const kod = row.key[0];
+          const value = parseFloat(row.values[0]);
+          if (!isNaN(value)) kodToValue[kod] = value;
+        }
+        console.log(`SCB data: ${Object.keys(kodToValue).length} values loaded`);
 
-      const dataRes = await fetch(SCB_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(scbQuery),
-      });
-      if (!dataRes.ok) {
-        const errText = await dataRes.text();
-        throw new Error(`SCB data HTTP ${dataRes.status}: ${errText.slice(0, 200)}`);
+        scbCache.data = { nameToKod, kodToValue };
+        scbCache.ts = Date.now();
+        await saveToSupabase('scb_sysselsattning_2024', { nameToKod, kodToValue });
       }
-      const scbData = await dataRes.json();
-
-      kodToValue = {};
-      for (const row of (scbData.data || [])) {
-        const kod = row.key[0];
-        const value = parseFloat(row.values[0]);
-        if (!isNaN(value)) kodToValue[kod] = value;
-      }
-      console.log(`SCB data: ${Object.keys(kodToValue).length} values loaded`);
-
-      scbCache.data = { nameToKod, kodToValue };
-      scbCache.ts = Date.now();
     }
 
     // 2. GADM GeoJSON (cached 7 days)
