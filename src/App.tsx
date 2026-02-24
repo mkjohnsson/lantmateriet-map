@@ -10,6 +10,7 @@ import VectorSource from 'ol/source/Vector';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import { Icon, Style, Circle as CircleStyle, Fill, Stroke } from 'ol/style';
+import GeoJSON from 'ol/format/GeoJSON';
 import Overlay from 'ol/Overlay';
 import { fromLonLat } from 'ol/proj';
 import { transformExtent } from 'ol/proj';
@@ -81,6 +82,14 @@ const POI_CATEGORIES = [
 
 type PoiCategory = typeof POI_CATEGORIES[number]['id'];
 
+function sysselsattningColor(pct: number): string {
+  // 65% → red, 80% → green (linear interpolation)
+  const t = Math.max(0, Math.min(1, (pct - 65) / 15));
+  const r = Math.round(220 - t * 165);
+  const g = Math.round(60 + t * 140);
+  return `rgba(${r},${g},60,0.75)`;
+}
+
 function App() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<Map | null>(null);
@@ -91,6 +100,10 @@ function App() {
   const aiSource = useRef<VectorSource>(new VectorSource());
   const poiLayerRef = useRef<VectorLayer | null>(null);
   const aiLayerRef = useRef<VectorLayer | null>(null);
+  const sysSattSource = useRef<VectorSource>(new VectorSource());
+  const sysSattLayerRef = useRef<VectorLayer | null>(null);
+  const showSysselsattningRef = useRef(false);
+  const loadingSyssRef = useRef(false);
   const popupRef = useRef<HTMLDivElement>(null);
   const popupOverlay = useRef<Overlay | null>(null);
   const coordRef = useRef<HTMLSpanElement>(null);
@@ -102,6 +115,7 @@ function App() {
   const [searching, setSearching] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [showSysselsattning, setShowSysselsattning] = useState(false);
   const [activePoiCategory, setActivePoiCategory] = useState<PoiCategory | null>(null);
   const [loadingPois, setLoadingPois] = useState(false);
   const activeCategoryRef = useRef<PoiCategory | null>(null);
@@ -173,6 +187,53 @@ function App() {
       fetchPois(categoryId);
     }
   }, [fetchPois]);
+
+  const toggleSysselsattning = useCallback(async () => {
+    const nextShow = !showSysselsattningRef.current;
+    showSysselsattningRef.current = nextShow;
+    setShowSysselsattning(nextShow);
+
+    if (sysSattLayerRef.current) {
+      sysSattLayerRef.current.setVisible(nextShow);
+    }
+
+    if (!nextShow && popupOverlay.current) {
+      popupOverlay.current.setPosition(undefined);
+    }
+
+    if (nextShow && sysSattSource.current.getFeatures().length === 0 && !loadingSyssRef.current) {
+      loadingSyssRef.current = true;
+      try {
+        const res = await fetch(`${apiBase}/api/kommuner-sysselsattning`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const geojson = await res.json();
+
+        const format = new GeoJSON();
+        const features = format.readFeatures(geojson, { featureProjection: 'EPSG:3857' });
+
+        for (const feature of features) {
+          const value = feature.get('sysselsattning');
+          feature.setStyle(new Style({
+            fill: new Fill({
+              color: value !== null && value !== undefined
+                ? sysselsattningColor(value)
+                : 'rgba(120,120,120,0.5)',
+            }),
+            stroke: new Stroke({ color: '#ffffff44', width: 0.5 }),
+          }));
+        }
+
+        sysSattSource.current.addFeatures(features);
+      } catch (e) {
+        console.error('Sysselsättning fetch error:', e);
+        showSysselsattningRef.current = false;
+        setShowSysselsattning(false);
+        if (sysSattLayerRef.current) sysSattLayerRef.current.setVisible(false);
+      } finally {
+        loadingSyssRef.current = false;
+      }
+    }
+  }, []);
 
   // Plot AI places on map
   const plotAIPlaces = useCallback((places: AIPlace[]) => {
@@ -345,6 +406,14 @@ function App() {
       }),
     });
 
+    const sysSattLayer = new VectorLayer({
+      source: sysSattSource.current,
+      visible: false,
+      opacity: 0.75,
+      zIndex: 1,
+    });
+    sysSattLayerRef.current = sysSattLayer;
+
     const poiLayer = new VectorLayer({
       source: poiSource.current,
     });
@@ -366,7 +435,7 @@ function App() {
 
     const map = new Map({
       target: mapRef.current,
-      layers: [lmLayer, osmLayer, markerLayer, poiLayer, aiLayer],
+      layers: [lmLayer, osmLayer, sysSattLayer, markerLayer, poiLayer, aiLayer],
       view: new View({
         center: fromLonLat([18.07, 59.33]), // Stockholm
         zoom: 5,
@@ -399,36 +468,51 @@ function App() {
       }
     });
 
-    // Click on POI or AI marker → show popup
+    // Click on POI, AI marker, or municipality → show popup
     map.on('singleclick', (e) => {
+      // Prioritise POI/AI over municipality polygons
       const feature = map.forEachFeatureAtPixel(e.pixel, f => f, {
-        layerFilter: l => l === poiLayer || l === aiLayer,
+        layerFilter: l => l === poiLayer || l === aiLayer || l === sysSattLayer,
       });
       if (feature) {
-        const name = feature.get('poiName');
-        const category = feature.get('poiCategory');
-        const tags = feature.get('poiTags') || {};
-        const geom = feature.getGeometry() as Point;
-
         const popupEl = popupRef.current;
-        if (popupEl) {
-          let html = `<strong>${name}</strong><br/><span class="poi-popup-type">${category}</span>`;
-          if (tags.description) html += `<br/>${tags.description}`;
-          if (tags.cuisine) html += `<br/>${tags.cuisine}`;
-          if (tags.opening_hours) html += `<br/>${tags.opening_hours}`;
-          if (tags.operator) html += `<br/>${tags.operator}`;
-          popupEl.querySelector('.poi-popup-content')!.innerHTML = html;
+        if (feature.get('NAME_2') !== undefined) {
+          // Municipality polygon
+          const name = feature.get('NAME_2');
+          const sysselsattning = feature.get('sysselsattning');
+          if (popupEl) {
+            let html = `<strong>${name}</strong><br/><span class="poi-popup-type">Sysselsättningsgrad</span>`;
+            html += sysselsattning !== null && sysselsattning !== undefined
+              ? `<br/>${sysselsattning}%`
+              : `<br/>Data saknas`;
+            popupEl.querySelector('.poi-popup-content')!.innerHTML = html;
+          }
+          overlay.setPosition(e.coordinate);
+        } else {
+          // POI or AI marker
+          const name = feature.get('poiName');
+          const category = feature.get('poiCategory');
+          const tags = feature.get('poiTags') || {};
+          const geom = feature.getGeometry() as Point;
+          if (popupEl) {
+            let html = `<strong>${name}</strong><br/><span class="poi-popup-type">${category}</span>`;
+            if (tags.description) html += `<br/>${tags.description}`;
+            if (tags.cuisine) html += `<br/>${tags.cuisine}`;
+            if (tags.opening_hours) html += `<br/>${tags.opening_hours}`;
+            if (tags.operator) html += `<br/>${tags.operator}`;
+            popupEl.querySelector('.poi-popup-content')!.innerHTML = html;
+          }
+          overlay.setPosition(geom.getCoordinates());
         }
-        overlay.setPosition(geom.getCoordinates());
       } else {
         overlay.setPosition(undefined);
       }
     });
 
-    // Change cursor on hover over POI or AI marker
+    // Change cursor on hover over POI, AI marker, or municipality
     map.on('pointermove', (e) => {
       const hit = map.hasFeatureAtPixel(e.pixel, {
-        layerFilter: l => l === poiLayer || l === aiLayer,
+        layerFilter: l => l === poiLayer || l === aiLayer || l === sysSattLayer,
       });
       map.getTargetElement().style.cursor = hit ? 'pointer' : '';
     });
@@ -546,6 +630,13 @@ function App() {
               {cat.label}
             </button>
           ))}
+          <button
+            className={`poi-btn ${showSysselsattning ? 'active' : ''}`}
+            style={{ '--poi-color': '#6366f1' } as React.CSSProperties}
+            onClick={toggleSysselsattning}
+          >
+            Sysselsättning
+          </button>
           {loadingPois && <span className="poi-loading">Laddar...</span>}
         </div>
         {/* Chat panel — always visible on mobile, sidebar on desktop */}

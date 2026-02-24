@@ -24,6 +24,15 @@ const WMTS_BASE = 'https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts';
 let cachedToken = null;
 let tokenExpiry = 0;
 
+// ── Sysselsättning caches ──────────────────────────────────────────────────
+const scbCache = { data: null, ts: 0 };
+const geoCache = { data: null, ts: 0 };
+const SCB_TTL = 24 * 60 * 60 * 1000;        // 24h
+const GEO_TTL = 7 * 24 * 60 * 60 * 1000;   // 7 days
+
+const SCB_URL = 'https://api.scb.se/OV0104/v1/doris/sv/ssd/AM/AM0210/AM0210D/ArRegArbStatus';
+const GADM_URL = 'https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_SWE_2.json';
+
 async function getToken() {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
@@ -258,6 +267,118 @@ app.post('/api/chat', async (req, res) => {
     res.json({ text, places });
   } catch (e) {
     console.error('Chat error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/kommuner-sysselsattning ─────────────────────────────────────
+app.get('/api/kommuner-sysselsattning', async (_req, res) => {
+  try {
+    // 1. SCB metadata + data (cached 24h)
+    let nameToKod, kodToValue;
+    if (scbCache.data && Date.now() - scbCache.ts < SCB_TTL) {
+      ({ nameToKod, kodToValue } = scbCache.data);
+    } else {
+      // GET metadata → build nameToKod (kommunnamn → 4-siffrig kod)
+      const metaRes = await fetch(SCB_URL);
+      if (!metaRes.ok) throw new Error(`SCB metadata HTTP ${metaRes.status}`);
+      const meta = await metaRes.json();
+
+      const regionVar = meta.variables.find(v => v.code === 'Region');
+      if (!regionVar) throw new Error('SCB: Region variable not found in metadata');
+
+      nameToKod = {};
+      const municipalityCodes = [];
+      regionVar.values.forEach((kod, i) => {
+        if (/^\d{4}$/.test(kod)) {          // 4-digit codes = municipalities
+          nameToKod[regionVar.valueTexts[i]] = kod;
+          municipalityCodes.push(kod);
+        }
+      });
+      console.log(`SCB metadata: ${municipalityCodes.length} municipalities found`);
+
+      // POST data → sysselsättningsgrad per municipality
+      const scbQuery = {
+        query: [
+          { code: 'Region',        selection: { filter: 'item', values: municipalityCodes } },
+          { code: 'Kon',           selection: { filter: 'item', values: ['1+2'] } },
+          { code: 'Alder',         selection: { filter: 'item', values: ['16-64'] } },
+          { code: 'Fodelseregion', selection: { filter: 'item', values: ['tot'] } },
+          { code: 'ContentsCode',  selection: { filter: 'item', values: ['000002NS'] } },
+          { code: 'Tid',           selection: { filter: 'item', values: ['2024'] } },
+        ],
+        response: { format: 'json' },
+      };
+
+      const dataRes = await fetch(SCB_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(scbQuery),
+      });
+      if (!dataRes.ok) {
+        const errText = await dataRes.text();
+        throw new Error(`SCB data HTTP ${dataRes.status}: ${errText.slice(0, 200)}`);
+      }
+      const scbData = await dataRes.json();
+
+      kodToValue = {};
+      for (const row of (scbData.data || [])) {
+        const kod = row.key[0];
+        const value = parseFloat(row.values[0]);
+        if (!isNaN(value)) kodToValue[kod] = value;
+      }
+      console.log(`SCB data: ${Object.keys(kodToValue).length} values loaded`);
+
+      scbCache.data = { nameToKod, kodToValue };
+      scbCache.ts = Date.now();
+    }
+
+    // 2. GADM GeoJSON (cached 7 days)
+    let gadmGeo;
+    if (geoCache.data && Date.now() - geoCache.ts < GEO_TTL) {
+      gadmGeo = geoCache.data;
+    } else {
+      console.log('Fetching GADM GeoJSON…');
+      const geoRes = await fetch(GADM_URL);
+      if (!geoRes.ok) throw new Error(`GADM HTTP ${geoRes.status}`);
+      gadmGeo = await geoRes.json();
+      geoCache.data = gadmGeo;
+      geoCache.ts = Date.now();
+      console.log(`GADM: ${gadmGeo.features.length} total features cached`);
+    }
+
+    // 3. Merge: add kod + sysselsattning to each municipality feature
+    // Build case-insensitive fallback map
+    const nameLower = {};
+    for (const [name, kod] of Object.entries(nameToKod)) {
+      nameLower[name.toLowerCase()] = kod;
+    }
+
+    const unmatched = [];
+    const features = gadmGeo.features
+      .filter(f => f.properties.ENGTYPE_2 === 'Municipality')
+      .map(f => {
+        const name2 = f.properties.NAME_2 || '';
+        const kod = nameToKod[name2] || nameLower[name2.toLowerCase()] || null;
+        const sysselsattning = kod ? (kodToValue[kod] ?? null) : null;
+        if (!kod) unmatched.push(name2);
+        return {
+          ...f,
+          properties: {
+            ...f.properties,
+            kod,
+            sysselsattning,
+          },
+        };
+      });
+
+    if (unmatched.length > 0) {
+      console.warn('Unmatched municipalities (no SCB data):', unmatched);
+    }
+
+    res.json({ type: 'FeatureCollection', features });
+  } catch (e) {
+    console.error('Sysselsättning endpoint error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
