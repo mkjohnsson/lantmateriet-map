@@ -619,6 +619,17 @@ function App() {
       </div>
       <div className="map-container">
         <div ref={mapRef} className="map" />
+        {showSysselsattning && (
+          <div className="syss-legend">
+            <div className="syss-legend-title">Sysselsättningsgrad</div>
+            <div className="syss-legend-bar" />
+            <div className="syss-legend-labels">
+              <span>65%</span>
+              <span>72%</span>
+              <span>80%</span>
+            </div>
+          </div>
+        )}
         <div className="poi-bar">
           {POI_CATEGORIES.map(cat => (
             <button

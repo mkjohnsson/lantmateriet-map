@@ -458,6 +458,42 @@ html, body, #root {
 }
 
 
+/* Sysselsättning legend */
+.syss-legend {
+  position: absolute;
+  bottom: 2.5rem;
+  left: 0.5rem;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(6px);
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.6rem 0.4rem;
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  pointer-events: none;
+}
+
+.syss-legend-title {
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+  white-space: nowrap;
+}
+
+.syss-legend-bar {
+  width: 120px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(to right, rgba(220,60,60,0.9), rgba(55,200,60,0.9));
+  margin-bottom: 0.25rem;
+}
+
+.syss-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  color: #94a3b8;
+}
+
 /* Mobile responsive */
 @media (max-width: 640px) {
   /* Toolbar: compact single row */
