@@ -56,6 +56,22 @@ app.use((req, res, next) => {
   next();
 });
 
+// Signal-alert — skicka meddelande till ägaren via signal-cli REST
+const SIGNAL_API  = 'http://localhost:8080';
+const SIGNAL_FROM = '+46761696172';
+const SIGNAL_TO   = 'fe98c97f-c11b-4a8f-9a86-02134c90202b';
+const alertCooldowns = new Map(); // undvik spam: max 1 alert per path per 10 min
+
+async function signalAlert(message) {
+  try {
+    await fetch(`${SIGNAL_API}/v2/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, number: SIGNAL_FROM, recipients: [SIGNAL_TO] }),
+    });
+  } catch { /* ignorera om signal-cli är nere */ }
+}
+
 // Rate limiter för dyra endpoints
 const rateLimits = new Map();
 function rateLimit(windowMs, max) {
@@ -66,7 +82,16 @@ function rateLimit(windowMs, max) {
     if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
     entry.count++;
     rateLimits.set(key, entry);
-    if (entry.count > max) return res.status(429).json({ error: 'För många förfrågningar, försök igen senare.' });
+    if (entry.count > max) {
+      // Skicka Signal-alert första gången per 10 min per endpoint
+      const cooldownKey = req.path;
+      const lastAlert = alertCooldowns.get(cooldownKey) || 0;
+      if (now - lastAlert > 10 * 60 * 1000) {
+        alertCooldowns.set(cooldownKey, now);
+        signalAlert(`⚠️ weraryu.com rate limit: ${req.path}\nIP: ${req.ip} (${entry.count} req)`);
+      }
+      return res.status(429).json({ error: 'För många förfrågningar, försök igen senare.' });
+    }
     next();
   };
 }
