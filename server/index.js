@@ -1,10 +1,12 @@
 import express from 'express';
+import helmet from 'helmet';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { createClient } from '@supabase/supabase-js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
+app.use(helmet({ contentSecurityPolicy: false })); // CSP hanteras av Cloudflare
 
 // Supabase persistent cache
 const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
@@ -68,6 +70,13 @@ function rateLimit(windowMs, max) {
     next();
   };
 }
+// Rensa utgångna rate limit-poster varje 10 min (undvik minnesläcka)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimits) {
+    if (now > entry.resetAt) rateLimits.delete(key);
+  }
+}, 10 * 60 * 1000);
 
 app.use(express.json());
 
@@ -109,7 +118,7 @@ async function getToken() {
 }
 
 // Proxy all WMTS requests (KVP and REST)
-app.get('/api/wmts', async (req, res) => {
+app.get('/api/wmts', rateLimit(60 * 1000, 120), async (req, res) => {
   try {
     const token = await getToken();
     const qs = new URLSearchParams(req.query).toString();
@@ -255,6 +264,9 @@ app.post('/api/chat', rateLimit(60 * 60 * 1000, 20), async (req, res) => {
     const { message } = req.body;
     if (!message) {
       return res.status(400).json({ error: 'message required' });
+    }
+    if (typeof message !== 'string' || message.length > 2000) {
+      return res.status(400).json({ error: 'Meddelandet får vara max 2000 tecken.' });
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
