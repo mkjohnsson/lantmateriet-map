@@ -41,14 +41,33 @@ async function saveToSupabase(key, data) {
   }
 }
 
-// CORS for dev
-app.use((_req, res, next) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
-  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  if (_req.method === 'OPTIONS') return res.sendStatus(204);
+// CORS — tillåt bara egen domän och localhost (dev)
+const ALLOWED_ORIGINS = new Set(['https://weraryu.com', 'http://localhost:5173', 'http://localhost:3000']);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+// Rate limiter för dyra endpoints
+const rateLimits = new Map();
+function rateLimit(windowMs, max) {
+  return (req, res, next) => {
+    const key = req.ip + req.path;
+    const now = Date.now();
+    const entry = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+    entry.count++;
+    rateLimits.set(key, entry);
+    if (entry.count > max) return res.status(429).json({ error: 'För många förfrågningar, försök igen senare.' });
+    next();
+  };
+}
 
 app.use(express.json());
 
@@ -148,7 +167,7 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const poiCache = new Map();
 const POI_CACHE_TTL = 5 * 60 * 1000; // 5 min
 
-app.get('/api/pois', async (req, res) => {
+app.get('/api/pois', rateLimit(60 * 1000, 60), async (req, res) => {
   try {
     const { category, bbox } = req.query;
     const cat = POI_CATEGORIES[category];
@@ -165,7 +184,14 @@ app.get('/api/pois', async (req, res) => {
       return res.json(cached.data);
     }
 
-    const [south, west, north, east] = bbox.split(',');
+    // Validera bbox — 4 decimaltal inom giltiga lat/lon-intervall
+    const parts = bbox.split(',');
+    if (parts.length !== 4) return res.status(400).json({ error: 'bbox måste ha exakt 4 värden' });
+    const [south, west, north, east] = parts.map(Number);
+    if (parts.some(p => isNaN(Number(p)))) return res.status(400).json({ error: 'bbox-värden måste vara tal' });
+    if (south < -90 || north > 90 || south >= north) return res.status(400).json({ error: 'Ogiltiga latitudvärden i bbox' });
+    if (west < -180 || east > 180) return res.status(400).json({ error: 'Ogiltiga longitudvärden i bbox' });
+
     const query = `[out:json][timeout:10];node["${cat.key}"="${cat.value}"](${south},${west},${north},${east});out body;`;
 
     const overpassRes = await fetch(OVERPASS_URL, {
@@ -224,7 +250,7 @@ Regler:
 - Ge en informativ textbeskrivning utöver platserna
 - Om frågan handlar om flera platser, inkludera alla relevanta platser i JSON-blocket`;
 
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', rateLimit(60 * 60 * 1000, 20), async (req, res) => {
   try {
     const { message } = req.body;
     if (!message) {
